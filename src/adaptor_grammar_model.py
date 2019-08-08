@@ -98,7 +98,7 @@ def apply(args):
                     word_characters.append(c)
                 word = " ".join(word_characters)
                 words[word] = words.get(word, 0) + 1
-    data = "\n".join(["^^^ {} $$$".format(w) for w in words.keys()][0:100])
+    data = "\n".join(["^^^ {} $$$".format(w) for w in words.keys()])
     try:
         _, data_fname = tempfile.mkstemp()
         _, grammar_fname = tempfile.mkstemp()

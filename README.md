@@ -32,3 +32,7 @@ This only uses the most-frequent 10000 words from the training data, and saves t
 ```
 pipenv run -- python src/adaptor_grammar_model.py apply --input TEST_DATA --grammar grammar_en.txt  --cky ../cky/ --output segs.txt
 ```
+
+## Details
+
+0020

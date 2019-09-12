@@ -9,6 +9,33 @@ import shlex
 import sys
 import re
 from nltk import Tree
+from pkg_resources import resource_string, resource_listdir, resource_isdir
+
+
+def list_templates(args):    
+    templates = [os.path.splitext(os.path.basename(x))[0] for x in resource_listdir(__name__, "grammar_templates")]
+    print("Included grammar templates: {}".format(", ".join(templates)))
+
+
+def get_template(template):
+    if os.path.exists(template):
+        with gzip.open(template, "rt") if template.endswith("gz") else open(template, "rt") as ifd:
+            retval = ifd.read().strip()
+    else:
+        templates = {os.path.splitext(os.path.basename(x))[0] : x for x in resource_listdir(__name__, "grammar_templates")}
+        if template in templates:
+            retval = resource_string(__name__, os.path.join("grammar_templates", templates[template])).decode("utf-8").strip()
+        else:
+            retval = None
+    return retval            
+
+
+def show_template(args):
+    template = get_template(args.template)
+    if template == None:
+        print("'{}' is neither a file nor a built-in template name (run the 'list' subcommand to check available templates')".format(args.template))
+    else:
+        print(template)
 
 
 space = "0020"
@@ -47,10 +74,17 @@ def make_pcfg(ag_gram, ensure_characters=set(), unseen_weight=0.1):
     return "\n".join(new_lines)
 
 
-def train(args):
+def train_model(args):
+
+    if not os.path.exists(args.pycfg):
+        raise Exception("""
+Could not find py-cfg-quad binary under '{}'!
+Did you forget to install it, or specify the wrong path to the --pycfg switch?
+See the pyseg README.md file for instructions.
+""")
+
     logging.info("Reading grammar template from %s", args.template)
-    with gzip.open(args.template, "rt") if args.template.endswith("gz") else open(args.template, "rt") as ifd:
-        template = ifd.read().strip()        
+    template = get_template(args.template)
     words = {}
     unique_characters = set(["^^^", "$$$"])
     logging.info("Reading data from %s", args.input)
@@ -108,33 +142,47 @@ def tree_to_morphs(tree):
     if isinstance(tree, str):
         return []
     elif all([isinstance(c, str) for c in tree]):
-        return ["".join([chr(int(c, base=16)) for c in tree.leaves()])]
+        return ["".join([chr(int(c, base=16)) for c in tree.leaves() if c not in ["^^^", "$$$"]])]
     elif tree.label() == "Chars":
         return ["".join([chr(int(c, base=16)) for c in tree.leaves() if c not in ["^^^", "$$$"]])]
     else:
         return sum([tree_to_morphs(x) for x in tree], [])
     #return ["".join([chr(int(c, base=16)) for c in x.leaves() if c not in ["^^^", "$$$"]]) for x in tree if not isinstance(x, str)]
 
+def segment(segmentations, token, args):
+    toks = segmentations.get(token, list(token))
+    toks = ["{}@@".format(t) for t in toks[0:-1]] + [toks[-1]]
+    return toks
 
-def apply(args):
+def apply_model(args):
+
+    if not os.path.exists(args.cky):
+        raise Exception("""
+Could not find ncky binary under '{}'!
+Did you forget to install it, or specify the wrong path to the --cky switch?
+See the pyseg README.md file for instructions.
+""")
+
     words = {}
+    word_lookup = {}
     unique_characters = set(["^^^", "$$$"])
     with gzip.open(args.input, "rt") if args.input.endswith("gz") else open(args.input, "rt") as ifd:
         for line in ifd:
             line = (line.lower() if args.lowercase else line).strip()            
             for word in ([line] if args.sentence else line.split()): #(line.lower() if args.lowercase else line).strip().split():
-                #for word in (line.lower() if args.lowercase else line).strip().split():
                 word_characters = []
                 for c in word:                    
                     c = "%.4x" % (ord(c))
                     word_characters.append(c)
                     unique_characters.add(c)
-                word = " ".join(word_characters)
-                words[word] = words.get(word, 0) + 1
-    with gzip.open(args.grammar, "rt") if args.grammar.endswith("gz") else open(args.grammar, "rt") as ifd:
+                cpword = "^^^ {} $$$".format(" ".join(word_characters))
+                words[cpword] = words.get(cpword, 0) + 1
+                word_lookup[cpword] = word
+    with gzip.open(args.model, "rt") if args.model.endswith("gz") else open(args.model, "rt") as ifd:
         grammar = make_pcfg(ifd.read(), unique_characters, args.unseen_weight)
 
-    data = "\n".join(["^^^ {} $$$".format(w) for w in words.keys()])
+
+    data = "\n".join(words.keys()) #["^^^ {} $$$".format(w) for w in words.keys()])
     try:
         _, data_fname = tempfile.mkstemp()
         _, grammar_fname = tempfile.mkstemp()
@@ -152,47 +200,17 @@ def apply(args):
         for fname in [grammar_fname, data_fname]:
             if os.path.exists(fname):
                 os.remove(fname)
+
+    segmentations = {}
+    for orig, line in zip(data.decode().split("\n"), out.decode().split("\n")):
+        if not re.match(r"^\s*$", line):
+            tr = Tree.fromstring(line)
+            morphs = tree_to_morphs(tr)                
+            segmentations[word_lookup[orig]] = morphs
+
+    
     with gzip.open(args.output, "wt") if args.output.endswith("gz") else open(args.output, "wt") as ofd:
-        for orig, line in zip(data.decode().split("\n"), out.decode().split("\n")):
-            if not re.match(r"^\s*$", line):
-                tr = Tree.fromstring(line)
-                morphs = tree_to_morphs(tr)                
-                ofd.write(" ".join([m for m in morphs if len(m) > 0]) + "\n")
-
-
-if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-        
-    subparsers = parser.add_subparsers()
-    train_parser = subparsers.add_parser("train")
-    train_parser.add_argument("--pycfg", dest="pycfg", default=".", help="Directory with py-cfg binaries")
-    train_parser.add_argument("--num_iterations", dest="num_iterations", type=int, default=10)
-    train_parser.add_argument("--limit", dest="limit", type=int, default=None, help="Limit the number of training lines")
-    train_parser.add_argument("--anneal_iterations", dest="anneal_iterations", type=int, default=5)
-    train_parser.add_argument("--anneal_initial", dest="anneal_initial", type=float, default=3.0)
-    train_parser.add_argument("--anneal_final", dest="anneal_final", type=float, default=1.0)    
-    train_parser.add_argument("--input", dest="input", required=True, help="Input file")
-    train_parser.add_argument("--template", dest="template", required=True, help="Grammar template file")
-    train_parser.add_argument("--lowercase", dest="lowercase", default=False, action="store_true", help="Whether to lower-case the data")
-    train_parser.add_argument("--sentence", dest="sentence", default=False, action="store_true", help="Operate at sentence level rather than word level")
-    train_parser.add_argument("--type_level", dest="type_level", default=False, action="store_true", help="Type-level")
-    train_parser.add_argument("--output", dest="output", required=True, help="Output file")
-    train_parser.set_defaults(func=train)
-    
-    apply_parser = subparsers.add_parser("apply")
-    apply_parser.add_argument("--cky", dest="cky", default=".", help="Directory with cky binaries")
-    apply_parser.add_argument("--grammar", dest="grammar", required=True, help="Input file")
-    apply_parser.add_argument("--unseen_weight", dest="unseen_weight", default=0.1, help="Weight to assign characters not seen in training")
-    apply_parser.add_argument("--input", dest="input", required=True, help="Input file")
-    apply_parser.add_argument("--sentence", dest="sentence", default=False, action="store_true", help="Operate at sentence level rather than word level")    
-    apply_parser.add_argument("--lowercase", dest="lowercase", default=False, action="store_true", help="Whether to lower-case the data")
-    apply_parser.add_argument("--type_level", dest="type_level", default=False, action="store_true", help="Type-level")
-    apply_parser.add_argument("--bpe", dest="bpe", default=False, action="store_true", help="Insert BPE-style '@@'-boundaries")
-    apply_parser.add_argument("--output", dest="output", required=True, help="Output file")    
-    apply_parser.set_defaults(func=apply)
-    
-    args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO)
-
-    args.func(args)
+        with gzip.open(args.input, "rt") if args.input.endswith("gz") else open(args.input, "rt") as ifd:
+            for line in ifd:
+                segmented = " ".join(sum([segment(segmentations, t, args) for t in line.strip().split()], []))
+                ofd.write(segmented + "\n")

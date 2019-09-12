@@ -1,0 +1,6 @@
+0 1 Word --> ^^^ Morphs $$$
+0 1 Morphs --> Morph Morphs
+0 1 Morphs --> Morph
+Morph --> Chars
+0 1 Chars --> Char Chars
+0 1 Chars --> Char

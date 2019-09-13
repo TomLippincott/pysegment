@@ -2,9 +2,24 @@ import argparse
 import logging
 from .ag import apply_model, train_model, list_templates, show_template
 
+quickstart = """For full(er) documentation see:
+
+  https://github.com/TomLippincott/pysegment
+
+But for convenience, the required dependencies 
+can be downloaded with:
+
+  wget http://web.science.mq.edu.au/~mjohnson/code/py-cfg-2013-09-23.tgz
+  wget http://web.science.mq.edu.au/~mjohnson/code/cky.tbz
+
+Untar and run make in both directories, and 
+use pysegment with the "--pycfg"/"--cky" 
+switches pointing to the directories.
+"""
+
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser("pysegment")
+    parser = argparse.ArgumentParser("pysegment", epilog=quickstart, formatter_class=argparse.RawDescriptionHelpFormatter)
     subparsers = parser.add_subparsers()
 
     list_parser = subparsers.add_parser("list")

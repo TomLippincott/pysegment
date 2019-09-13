@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name="pysegment",
-    version="0.3",
+    version="0.4",
     packages=["pysegment"],
     license="Creative Commons Attribution-Noncommercial-Share Alike license",
     long_description="Tools for unsupervised segmentation and morphology",
